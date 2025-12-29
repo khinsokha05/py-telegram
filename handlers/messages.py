@@ -44,9 +44,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_message = update.message.text
     chat_type = update.effective_chat.type
 
+    # Get chat name
+    chat_name = update.effective_chat.title if update.effective_chat.title else "Private Chat"
+
+    # Check if AI is enabled for this chat
+    if not BotService.is_ai_enabled(chat_id):
+        return
+
     # Track user request for statistics
     LoggerService.track_user_request(user_id, username)
-    
     BotService.update_stats(user_id)
     
     if not await BotService.check_user_permission(user_id):
@@ -58,7 +64,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ {reason}")
         await LoggerService.log_to_group(
             context,
-            f"⚠️ Moderation triggered\nUser: {user_id}\nChat: {chat_id}\nReason: {reason}",
+            f"⚠️ <b>Moderation triggered</b>\n"
+            f"User: <code>{user_id}</code>, @{username or 'Unknown'}\n"
+            f"Chat: <code>{chat_id}</code>, {chat_name}\n"
+            f"Reason: {reason}",
             "WARNING"
         )
         return
@@ -108,11 +117,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode='MarkdownV2'
         )
         
-        await LoggerService.log_user_activity(
-            context, user_id, username,
-            "Message processed",
-            f"Chat: {chat_id} ({chat_type}), Message: {user_message[:50]}..."
-        )
+        # await LoggerService.log_user_activity(
+        #     context, user_id, username,
+        #     "Message processed",
+        #     f"Chat: {chat_id} ({chat_type}), Message: {user_message[:50]}..."
+        # )
         
     except Exception as e:
         error_msg = str(e)

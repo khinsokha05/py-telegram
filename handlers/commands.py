@@ -41,6 +41,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/clear - Clear conversation history for THIS chat\n"
         "/myGroup - Information Group\n"
         "/stats - Show bot statistics\n\n"
+        "/stopAI - Disable AI responses in this chat\n"
+        "/startAI - Enable AI responses in this chat\n"
         "Just send me any message and I'll respond intelligently!\n\n"
         "ℹ️ Note: Each chat (private or group) has its own separate conversation history."
     )
@@ -145,4 +147,54 @@ async def test_log_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         
     except Exception as e:
-        await update.message.reply_text(f"❌ Error: {str(e)}")    
+        await update.message.reply_text(f"❌ Error: {str(e)}")
+
+async def stop_ai_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /stopAI command - disable AI responses in this chat"""
+    chat_id = update.effective_chat.id
+    user_id = update.effective_user.id
+    username = update.effective_user.username
+    
+    # Disable AI for this chat
+    BotService.disable_ai(chat_id)
+    
+    # Log the action
+    await LoggerService.log_user_activity(
+        context, user_id, username,
+        "AI disabled",
+        f"Chat ID: {chat_id}"
+    )
+    
+    await update.message.reply_text(
+        "🔴 <b>AI Responses Disabled</b>\n\n"
+        "I will no longer respond to regular messages in this chat.\n\n"
+        "Commands still work:\n"
+        "• /startAI - Re-enable AI responses\n"
+        "• /help - Show all commands\n"
+        "• /stats - View statistics\n"
+        "• /myGroup - Get chat info",
+        parse_mode='HTML'
+    )
+
+async def start_ai_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /startAI command - enable AI responses in this chat"""
+    chat_id = update.effective_chat.id
+    user_id = update.effective_user.id
+    username = update.effective_user.username
+    
+    # Enable AI for this chat
+    BotService.enable_ai(chat_id)
+    
+    # Log the action
+    await LoggerService.log_user_activity(
+        context, user_id, username,
+        "AI enabled",
+        f"Chat ID: {chat_id}"
+    )
+    
+    await update.message.reply_text(
+        "🟢 <b>AI Responses Enabled</b>\n\n"
+        "I'm back! Send me any message and I'll respond.\n\n"
+        "Use /stopAI to disable AI responses again.",
+        parse_mode='HTML'
+    )        

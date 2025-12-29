@@ -9,6 +9,9 @@ class BotService:
         "total_users": set(),
         "start_time": datetime.now()
     }
+
+    # Track which chats have AI disabled
+    ai_disabled_chats = set()  # Set of chat_ids where AI is turned off
     
     @staticmethod
     def update_stats(user_id: int):
@@ -25,6 +28,21 @@ class BotService:
             "unique_users": len(BotService.stats["total_users"]),
             "uptime": str(uptime).split('.')[0]
         }
+    
+    @staticmethod
+    def is_ai_enabled(chat_id: int) -> bool:
+        """Check if AI is enabled for this chat"""
+        return chat_id not in BotService.ai_disabled_chats
+    
+    @staticmethod
+    def disable_ai(chat_id: int):
+        """Disable AI for this chat"""
+        BotService.ai_disabled_chats.add(chat_id)
+    
+    @staticmethod
+    def enable_ai(chat_id: int):
+        """Enable AI for this chat"""
+        BotService.ai_disabled_chats.discard(chat_id)
     
     @staticmethod
     async def check_user_permission(user_id: int) -> bool:

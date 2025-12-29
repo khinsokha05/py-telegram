@@ -2,7 +2,7 @@ import logging
 import asyncio
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 from config import Config
-from handlers.commands import start, help_command, clear_command, stats_command, mygroup_command, test_log_command
+from handlers.commands import start, help_command, clear_command, stats_command, mygroup_command, test_log_command, stop_ai_command, start_ai_command
 from handlers.messages import handle_message, error_handler
 from services.logger import LoggerService
 
@@ -51,6 +51,8 @@ def main():
     application.add_handler(CommandHandler("stats", stats_command))
     application.add_handler(CommandHandler("myGroup", mygroup_command))
     application.add_handler(CommandHandler("testlog", test_log_command))
+    application.add_handler(CommandHandler("stopAI", stop_ai_command))      # NEW
+    application.add_handler(CommandHandler("startAI", start_ai_command)) 
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     application.add_error_handler(error_handler)
     

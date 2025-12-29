@@ -33,23 +33,31 @@ class LoggerService:
             logger.error(f"Failed to log to group: {e}")
     
     @staticmethod
-    async def log_user_activity(context, user_id: int, username: str, action: str, details: str = ""):
+    async def log_user_activity(context, user_id: int, username: str, action: str, details: str = "", chat_name: str = None):
         """Log user activity"""
         message = (
             f"👤 <b>User Activity</b>\n"
             f"User ID: <code>{user_id}</code>\n"
             f"Username: @{username or 'N/A'}\n"
+        )
+        
+        if chat_name:
+            message += f"Chat: {chat_name}\n"
+        
+        message += (
             f"Action: {action}\n"
             f"Details: {details}"
         )
         await LoggerService.log_to_group(context, message, "USER")
     
     @staticmethod
-    async def log_error(context, error_msg: str, user_id: int = None):
+    async def log_error(context, error_msg: str, user_id: int = None, chat_name: str = None):
         """Log errors"""
         message = f"❌ <b>Error Occurred</b>\n"
         if user_id:
             message += f"User ID: <code>{user_id}</code>\n"
+        if chat_name:
+            message += f"Chat: {chat_name}\n"
         message += f"Error: {error_msg}"
         await LoggerService.log_to_group(context, message, "ERROR")
     
