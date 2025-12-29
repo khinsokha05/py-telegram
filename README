@@ -1,0 +1,42 @@
+# Telegram Bot Project Structure
+
+## File Structure:
+```
+py-telegram/
+├── bot.py              # Main entry point
+├── config.py           # Configuration and environment variables
+├── services/
+│   ├── __init__.py     # Makes services a package
+│   ├── bot_service.py  # Bot logic and operations
+│   └── logger.py       # Logging functionality
+├── handlers/
+│   ├── __init__.py     # Makes handlers a package
+│   ├── commands.py     # Command handlers (/start, /help, etc)
+│   └── messages.py     # Message handlers
+├── .env                # Environment variables (DO NOT COMMIT)
+└── requirements.txt    # Python dependencies
+
+```
+
+## Installation:
+```bash
+pip install -r requirements.txt
+```
+
+## Setup:
+1. Create .env file with:
+   - TELEGRAM_BOT_TOKEN
+   - GROQ_API_KEY
+   - LOG_GROUP_ID (optional)
+
+2. Run the bot:
+   ```bash
+   python3 bot.py
+   ```
+
+## Benefits of this structure:
+- Easy to maintain and update
+- Separated concerns (handlers, services, config)
+- Easy to add new features
+- Better testing capabilities
+- Clean and organized code

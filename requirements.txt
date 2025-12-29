@@ -1,0 +1,34 @@
+nano requirements.txt
+```
+```
+python-telegram-bot>=20.0
+groq>=0.4.0
+python-dotenv>=1.0.0
+```
+
+---
+
+## **9. Your .env file remains the same:**
+```
+TELEGRAM_BOT_TOKEN=
+GROQ_API_KEY=
+LOG_GROUP_ID=
+```
+
+---
+
+## **Final structure:**
+```
+py-telegram/
+├── bot.py
+├── config.py
+├── requirements.txt
+├── .env
+├── services/
+│   ├── __init__.py
+│   ├── bot_service.py
+│   └── logger.py
+└── handlers/
+    ├── __init__.py
+    ├── commands.py
+    └── messages.py
