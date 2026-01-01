@@ -124,3 +124,48 @@ async def start_ai_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🟢 AI Enabled\n\n"
         "I'm back! Send me messages."
     )
+async def debug_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Debug command to check AI status"""
+    chat_id = update.effective_chat.id
+    user_id = update.effective_user.id
+    is_enabled = BotService.is_ai_enabled(chat_id)
+    
+    # Get conversation length
+    conv_length = len(chat_conversations.get(chat_id, []))
+    
+    # Get stats
+    stats = BotService.get_stats()
+    
+    message = (
+        f"🔍 <b>Debug Information</b>\n\n"
+        f"<b>Chat Info:</b>\n"
+        f"• Chat ID: <code>{chat_id}</code>\n"
+        f"• Chat Type: {update.effective_chat.type}\n"
+        f"• Chat Title: {update.effective_chat.title or 'Private Chat'}\n\n"
+        
+        f"<b>User Info:</b>\n"
+        f"• User ID: <code>{user_id}</code>\n"
+        f"• Username: @{update.effective_user.username or 'N/A'}\n\n"
+        
+        f"<b>AI Status:</b>\n"
+        f"• AI Enabled: {'✅ YES' if is_enabled else '❌ NO'}\n"
+        f"• Messages in chat: {conv_length}\n"
+        f"• Active conversations: {len(chat_conversations)}\n\n"
+        
+        f"<b>Bot Stats:</b>\n"
+        f"• Total Messages: {stats['total_messages']}\n"
+        f"• Unique Users: {stats['unique_users']}\n"
+        f"• Uptime: {stats['uptime']}\n\n"
+        
+        f"<i>Use /startAI to enable AI, /stopAI to disable</i>"
+    )
+    
+    await update.message.reply_text(message, parse_mode='HTML')
+    
+    # Log this activity
+    await LoggerService.log_user_activity(
+        context, user_id,
+        update.effective_user.username,
+        "Used debug command",
+        f"AI enabled: {is_enabled}, Conv length: {conv_length}"
+    )
