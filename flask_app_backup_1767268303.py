@@ -3,33 +3,35 @@ from flask import Flask, request, jsonify
 from telegram import Bot, Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 import asyncio
-import threading
 
-logging.basicConfig(level=logging.INFO)
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
 # Global bot application
 application = None
-initializing = False
-init_lock = threading.Lock()
 
-async def initialize_bot_async():
-    """Initialize bot with ALL your handlers"""
+def init_bot():
+    """Initialize the bot - SIMPLE AND RELIABLE"""
     global application
     
     try:
-        logger.info("🚀 Starting bot initialization with full handlers...")
+        logger.info("🚀 Initializing bot...")
         
-        # Import config
+        # Import config here to avoid circular imports
         from config import Config
         Config.validate()
         
         # Create application
         application = Application.builder().token(Config.TELEGRAM_BOT_TOKEN).build()
         
-        # Import YOUR handlers
+        # Import handlers
         from handlers.commands import (
             start, help_command, clear_command, 
             stats_command, mygroup_command, test_log_command,
@@ -37,7 +39,7 @@ async def initialize_bot_async():
         )
         from handlers.messages import handle_message, error_handler
         
-        # Add YOUR handlers
+        # Add handlers
         application.add_handler(CommandHandler("start", start))
         application.add_handler(CommandHandler("help", help_command))
         application.add_handler(CommandHandler("clear", clear_command))
@@ -49,49 +51,20 @@ async def initialize_bot_async():
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
         application.add_error_handler(error_handler)
         
-        # Initialize
-        await application.initialize()
+        # Initialize - THIS IS CRITICAL
+        application.initialize()
         
-        logger.info("✅ Bot initialized with full handlers!")
-        return True
+        logger.info("✅ Bot initialized successfully!")
+        return application
         
     except Exception as e:
-        logger.error(f"❌ Failed to initialize bot: {e}")
+        logger.error(f"❌ Bot initialization failed: {e}")
         import traceback
         logger.error(traceback.format_exc())
-        application = None
-        return False
+        return None
 
-def initialize_bot_sync():
-    """Initialize bot synchronously"""
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    return loop.run_until_complete(initialize_bot_async())
-
-def ensure_bot_initialized():
-    """Ensure bot is initialized (lazy initialization)"""
-    global application, initializing
-    
-    if application is not None and hasattr(application, '_initialized') and application._initialized:
-        return True
-    
-    with init_lock:
-        if initializing:
-            return False
-        elif application is None or not hasattr(application, '_initialized') or not application._initialized:
-            initializing = True
-            try:
-                logger.info("🤖 Initializing bot on first request...")
-                if initialize_bot_sync():
-                    logger.info("✅ Bot initialized successfully!")
-                    return True
-                else:
-                    logger.error("❌ Bot initialization failed")
-                    return False
-            finally:
-                initializing = False
-    
-    return False
+# Initialize bot on startup
+application = init_bot()
 
 @app.route('/')
 def home():
@@ -100,31 +73,37 @@ def home():
 @app.route('/webhook', methods=['POST'])
 def webhook():
     """Handle Telegram webhook updates"""
-    if not ensure_bot_initialized():
-        return "Bot initialization failed", 500
+    global application
+    
+    if application is None:
+        logger.error("Bot not initialized!")
+        return "Bot not initialized", 500
     
     try:
-        update_data = request.get_json(force=True)
+        # Get update data
+        update_data = request.get_json()
+        if not update_data:
+            return "No data", 400
+            
+        # Create update object
         update = Update.de_json(update_data, application.bot)
         
-        logger.info(f"📥 Processing update {update.update_id}")
-        
+        # Process the update
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         loop.run_until_complete(application.process_update(update))
         
-        logger.info(f"✅ Processed update {update.update_id}")
         return 'OK', 200
         
     except Exception as e:
-        logger.error(f"❌ Error: {e}")
+        logger.error(f"Webhook error: {e}")
         import traceback
-        traceback.print_exc()
+        logger.error(traceback.format_exc())
         return 'Error', 500
 
 @app.route('/webhook_info', methods=['GET'])
 def webhook_info():
-    """Check webhook status"""
+    """Get webhook information"""
     try:
         from config import Config
         bot = Bot(Config.TELEGRAM_BOT_TOKEN)
@@ -154,7 +133,10 @@ def set_webhook_route():
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         
+        # Delete old webhook
         loop.run_until_complete(bot.delete_webhook(drop_pending_updates=True))
+        
+        # Set new webhook
         result = loop.run_until_complete(bot.set_webhook(
             url=url,
             max_connections=100,
@@ -165,6 +147,16 @@ def set_webhook_route():
         
     except Exception as e:
         return f'❌ Error: {e}', 500
+
+@app.route('/health', methods=['GET'])
+def health():
+    """Health check endpoint"""
+    status = {
+        'flask': 'running',
+        'bot_initialized': application is not None,
+        'webhook_url': 'https://sokha.pythonanywhere.com/webhook'
+    }
+    return jsonify(status), 200
 
 if __name__ == '__main__':
     app.run(debug=False)

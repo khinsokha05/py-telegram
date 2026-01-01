@@ -37,50 +37,52 @@ def get_groq_client():
         logger.error(f"❌ Groq client error: {e}")
         return None
 
+def format_message_for_telegram(text: str) -> str:
+    """Format AI response for Telegram"""
+    if '```' in text:
+        parts = text.split('```')
+        for i in range(0, len(parts), 2):
+            parts[i] = escape_markdown_v2(parts[i])
+        return '```'.join(parts)
+    else:
+        return escape_markdown_v2(text)
+
+def escape_markdown_v2(text: str) -> str:
+    """Escape Telegram MarkdownV2 characters"""
+    special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+    for char in special_chars:
+        text = text.replace(char, f'\\{char}')
+    return text
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """DEBUG VERSION - Log everything"""
-    logger.info(f"📥 DEBUG: Received message from {update.effective_user.id}: {update.message.text}")
-    
+    """Handle user messages with AI"""
     # Get Groq client
     client = get_groq_client()
     if client is None:
-        logger.error("DEBUG: Groq client is None")
         await update.message.reply_text("❌ AI service unavailable.")
         return
     
     chat_id = update.effective_chat.id
     user_id = update.effective_user.id
     user_message = update.message.text
-    
-    logger.info(f"DEBUG: Chat ID: {chat_id}, User ID: {user_id}")
-    
+
     # Check if AI is enabled
-    ai_enabled = BotService.is_ai_enabled(chat_id)
-    logger.info(f"DEBUG: AI enabled for chat {chat_id}: {ai_enabled}")
-    
-    if not ai_enabled:
-        logger.info(f"DEBUG: AI disabled for chat {chat_id}, enabling...")
-        BotService.enable_ai(chat_id)  # Auto-enable
-        # await update.message.reply_text("🤖 AI enabled for this chat!")
-    
+    if not BotService.is_ai_enabled(chat_id):
+        return
+
     # Track user
     try:
         LoggerService.track_user_request(user_id, update.effective_user.username)
         BotService.update_stats(user_id)
-        logger.info("DEBUG: User tracked")
-    except Exception as e:
-        logger.error(f"DEBUG: User tracking error: {e}")
+    except:
+        pass
     
-    # Check permission
-    has_permission = await BotService.check_user_permission(user_id)
-    logger.info(f"DEBUG: User {user_id} has permission: {has_permission}")
-    
-    if not has_permission:
+    # Simple permission check
+    if not await BotService.check_user_permission(user_id):
         await update.message.reply_text("❌ No permission.")
         return
     
-    # Check message length
-    logger.info(f"DEBUG: Message length: {len(user_message)}, Max: {Config.MAX_MESSAGE_LENGTH}")
+    # Simple moderation
     if len(user_message) > Config.MAX_MESSAGE_LENGTH:
         await update.message.reply_text(f"❌ Message too long (max {Config.MAX_MESSAGE_LENGTH} chars)")
         return
@@ -88,7 +90,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Initialize conversation
     if chat_id not in chat_conversations:
         chat_conversations[chat_id] = []
-        logger.info(f"DEBUG: Created new conversation for chat {chat_id}")
     
     # Add user message
     chat_conversations[chat_id].append({
@@ -96,25 +97,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "content": user_message
     })
     
-    logger.info(f"DEBUG: Conversation history length: {len(chat_conversations[chat_id])}")
-    
     # Limit history
     if len(chat_conversations[chat_id]) > Config.MAX_HISTORY:
         chat_conversations[chat_id] = chat_conversations[chat_id][-Config.MAX_HISTORY:]
     
     try:
         await update.message.chat.send_action(action="typing")
-        logger.info("DEBUG: Sent typing action")
         
         # Prepare messages
         messages = [
             {
                 "role": "system",
-                "content": "You are a helpful AI assistant. Respond concisely."
+                "content": "You are a helpful AI assistant. Respond helpfully and concisely."
             }
         ] + chat_conversations[chat_id]
-        
-        logger.info(f"DEBUG: Sending to Groq model {Config.GROQ_MODEL}")
         
         # Get AI response
         response = client.chat.completions.create(
@@ -125,22 +121,25 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         
         ai_response = response.choices[0].message.content
-        logger.info(f"DEBUG: Got AI response: {ai_response[:50]}...")
         
         # Save AI response
         chat_conversations[chat_id].append({
             "role": "assistant",
             "content": ai_response
         })
+
+        # Format and send
+        formatted_message = format_message_for_telegram(ai_response)
         
-        # Send response
-        await update.message.reply_text(f"🤖 {ai_response}")
-        logger.info(f"✅ DEBUG: Response sent to chat {chat_id}")
+        await update.message.reply_text(
+            formatted_message,
+            parse_mode='MarkdownV2'
+        )
+        
+        logger.info(f"✅ AI response sent to chat {chat_id}")
         
     except Exception as e:
-        logger.error(f"DEBUG: Error: {e}")
-        import traceback
-        logger.error(traceback.format_exc())
+        logger.error(f"Error: {e}")
         await update.message.reply_text("❌ Error. Try again.")
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):

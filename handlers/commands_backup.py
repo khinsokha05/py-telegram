@@ -2,17 +2,10 @@ from telegram import Update
 from telegram.ext import ContextTypes
 from services.logger import LoggerService
 from services.bot_service import BotService
-import datetime
-from zoneinfo import ZoneInfo
 
 # Changed from user_conversations to chat_conversations
 # This makes each chat completely separate
 chat_conversations = {}
-
-def get_cambodia_time():
-    """Get current Cambodia time"""
-    cambodia_tz = ZoneInfo('Asia/Phnom_Penh')
-    return datetime.datetime.now(cambodia_tz).strftime('%Y-%m-%d %H:%M:%S')
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /start command"""
@@ -26,27 +19,18 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"First name: {update.effective_user.first_name}, Chat ID: {chat_id}"
     )
     
-    # Get Cambodia time
-    cambodia_time = get_cambodia_time()
-    
-    welcome_msg = f"""🇰🇭 ជំរាបសួរ! (Hello from Cambodia!)
-
-🤖 I'm a smart AI chatbot powered by Sokha.
-🕐 Cambodia Time: {cambodia_time}
-
-You can:
-• Chat with me naturally
-• Ask questions on any topic
-• Get help with coding, writing, analysis
-• Use /clear to reset conversation
-• Use /stats to see bot statistics
-• Use /help for more info
-
-💡 Each chat has its own separate conversation!
-
-What would you like to talk about?"""
-    
-    await update.message.reply_text(welcome_msg)
+    await update.message.reply_text(
+        "👋 Hello! I'm a smart AI chatbot powered by Sokha.\n\n"
+        "You can:\n"
+        "• Chat with me naturally\n"
+        "• Ask questions on any topic\n"
+        "• Get help with coding, writing, analysis\n"
+        "• Use /clear to reset conversation\n"
+        "• Use /stats to see bot statistics\n"
+        "• Use /help for more info\n\n"
+        "💡 Each chat has its own separate conversation!\n\n"
+        "What would you like to talk about?"
+    )
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /help command"""
@@ -115,6 +99,7 @@ async def mygroup_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     
     await update.message.reply_text(message, parse_mode='HTML')
+
 
 async def test_log_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Test logging to group - for debugging"""
@@ -212,4 +197,4 @@ async def start_ai_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "I'm back! Send me any message and I'll respond.\n\n"
         "Use /stopAI to disable AI responses again.",
         parse_mode='HTML'
-    )
+    )        
