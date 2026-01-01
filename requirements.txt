@@ -4,6 +4,8 @@ nano requirements.txt
 python-telegram-bot>=20.0
 groq>=0.4.0
 python-dotenv>=1.0.0
+Flask>=2.0.0
+httpx>=0.24.0
 ```
 
 ---
@@ -19,16 +21,3 @@ LOG_GROUP_ID=
 
 ## **Final structure:**
 ```
-py-telegram/
-├── bot.py
-├── config.py
-├── requirements.txt
-├── .env
-├── services/
-│   ├── __init__.py
-│   ├── bot_service.py
-│   └── logger.py
-└── handlers/
-    ├── __init__.py
-    ├── commands.py
-    └── messages.py

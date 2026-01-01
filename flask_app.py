@@ -1,35 +1,36 @@
 import logging
-from flask import Flask, request, jsonify
+from flask import Flask, request
 from telegram import Bot, Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 import asyncio
-import threading
+from threading import Thread
+import time
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
-# Global bot application
+# Global application instance
 application = None
-initializing = False
-init_lock = threading.Lock()
+loop = None
 
-async def initialize_bot_async():
-    """Initialize bot with ALL your handlers"""
-    global application
+def run_bot():
+    """Run the bot in background thread"""
+    global application, loop
+    
+    logger.info("🚀 Starting bot in background...")
+    
+    # Create new event loop for this thread
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     
     try:
-        logger.info("🚀 Starting bot initialization with full handlers...")
-        
-        # Import config
+        # Import here to avoid circular imports
         from config import Config
         Config.validate()
         
-        # Create application
-        application = Application.builder().token(Config.TELEGRAM_BOT_TOKEN).build()
-        
-        # Import YOUR handlers
+        # Import handlers
         from handlers.commands import (
             start, help_command, clear_command, 
             stats_command, mygroup_command, test_log_command,
@@ -37,7 +38,10 @@ async def initialize_bot_async():
         )
         from handlers.messages import handle_message, error_handler
         
-        # Add YOUR handlers
+        # Create application
+        application = Application.builder().token(Config.TELEGRAM_BOT_TOKEN).build()
+        
+        # Add handlers
         application.add_handler(CommandHandler("start", start))
         application.add_handler(CommandHandler("help", help_command))
         application.add_handler(CommandHandler("clear", clear_command))
@@ -49,49 +53,28 @@ async def initialize_bot_async():
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
         application.add_error_handler(error_handler)
         
-        # Initialize
-        await application.initialize()
+        # Initialize (but don't start polling since we use webhook)
+        loop.run_until_complete(application.initialize())
+        logger.info("✅ Bot initialized successfully!")
         
-        logger.info("✅ Bot initialized with full handlers!")
-        return True
+        # Keep the event loop running
+        loop.run_forever()
         
     except Exception as e:
-        logger.error(f"❌ Failed to initialize bot: {e}")
+        logger.error(f"❌ Bot initialization failed: {e}")
         import traceback
-        logger.error(traceback.format_exc())
-        application = None
-        return False
+        traceback.print_exc()
 
-def initialize_bot_sync():
-    """Initialize bot synchronously"""
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    return loop.run_until_complete(initialize_bot_async())
-
-def ensure_bot_initialized():
-    """Ensure bot is initialized (lazy initialization)"""
-    global application, initializing
-    
-    if application is not None and hasattr(application, '_initialized') and application._initialized:
-        return True
-    
-    with init_lock:
-        if initializing:
-            return False
-        elif application is None or not hasattr(application, '_initialized') or not application._initialized:
-            initializing = True
-            try:
-                logger.info("🤖 Initializing bot on first request...")
-                if initialize_bot_sync():
-                    logger.info("✅ Bot initialized successfully!")
-                    return True
-                else:
-                    logger.error("❌ Bot initialization failed")
-                    return False
-            finally:
-                initializing = False
-    
-    return False
+def process_update_sync(update):
+    """Process update synchronously"""
+    global application
+    if application:
+        # Run in the bot's event loop
+        future = asyncio.run_coroutine_threadsafe(
+            application.process_update(update), 
+            loop
+        )
+        future.result(timeout=10)
 
 @app.route('/')
 def home():
@@ -100,71 +83,70 @@ def home():
 @app.route('/webhook', methods=['POST'])
 def webhook():
     """Handle Telegram webhook updates"""
-    if not ensure_bot_initialized():
-        return "Bot initialization failed", 500
-    
     try:
         update_data = request.get_json(force=True)
-        update = Update.de_json(update_data, application.bot)
         
-        logger.info(f"📥 Processing update {update.update_id}")
+        # Wait a bit if bot is still starting
+        if application is None:
+            time.sleep(1)
         
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(application.process_update(update))
-        
-        logger.info(f"✅ Processed update {update.update_id}")
-        return 'OK', 200
-        
+        if application:
+            update = Update.de_json(update_data, application.bot)
+            logger.info(f"📥 Processing update {update.update_id}")
+            
+            # Process update in bot's thread
+            process_update_sync(update)
+            
+            logger.info(f"✅ Processed update {update.update_id}")
+            return 'OK', 200
+        else:
+            logger.error("Bot not initialized yet")
+            return 'Bot not ready', 503
+            
     except Exception as e:
         logger.error(f"❌ Error: {e}")
         import traceback
         traceback.print_exc()
         return 'Error', 500
 
-@app.route('/webhook_info', methods=['GET'])
-def webhook_info():
-    """Check webhook status"""
-    try:
-        from config import Config
-        bot = Bot(Config.TELEGRAM_BOT_TOKEN)
-        
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        info = loop.run_until_complete(bot.get_webhook_info())
-        
-        return jsonify({
-            'url': info.url,
-            'pending_update_count': info.pending_update_count,
-            'last_error_message': info.last_error_message,
-            'max_connections': info.max_connections
-        }), 200
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
 @app.route('/set_webhook', methods=['GET'])
-def set_webhook_route():
-    """Set webhook endpoint"""
+def set_webhook():
+    """Simple webhook setup"""
     try:
         from config import Config
-        url = request.args.get('url', 'https://sokha.pythonanywhere.com/webhook')
         bot = Bot(Config.TELEGRAM_BOT_TOKEN)
         
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+        # Create temporary event loop
+        temp_loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(temp_loop)
         
-        loop.run_until_complete(bot.delete_webhook(drop_pending_updates=True))
-        result = loop.run_until_complete(bot.set_webhook(
+        url = "https://sokha.pythonanywhere.com/webhook"
+        temp_loop.run_until_complete(bot.delete_webhook(drop_pending_updates=True))
+        result = temp_loop.run_until_complete(bot.set_webhook(
             url=url,
             max_connections=100,
             drop_pending_updates=True
         ))
+        temp_loop.close()
         
-        return f'✅ Webhook set to: {url}<br>Result: {result}', 200
+        return f'✅ Webhook set to: {url}', 200
         
     except Exception as e:
         return f'❌ Error: {e}', 500
 
+# Start bot in background thread when Flask starts
+@app.before_first_request
+def start_bot_thread():
+    """Start bot in background thread"""
+    bot_thread = Thread(target=run_bot, daemon=True)
+    bot_thread.start()
+    logger.info("🤖 Bot thread started")
+
 if __name__ == '__main__':
-    app.run(debug=False)
+    # Start bot thread
+    bot_thread = Thread(target=run_bot, daemon=True)
+    bot_thread.start()
+    logger.info("🤖 Bot thread started")
+    
+    # Start Flask
+    app.run(debug=False, host='0.0.0.0', port=5000)
