@@ -1,6 +1,10 @@
 import logging
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
-from config import Config
+
+# --- CRITICAL MISSING IMPORT ---
+from config import Config 
+# -------------------------------
+
 from handlers.commands import start, help_command, clear_command, stats_command, mygroup_command, test_log_command
 from handlers.messages import handle_message, error_handler
 
@@ -11,15 +15,18 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# REMOVED: periodic_report_task (Not supported on PythonAnywhere Web Workers)
-
 async def post_init(application):
-    logger.info("🤖 Bot initialized")
+    """Called after the bot is initialized"""
+    logger.info("🤖 Bot initialized for Webhook mode")
 
 def setup_application():
+    """Build the application without starting polling"""
     Config.validate()
+    
+    # Use the token from our imported Config class
     app = Application.builder().token(Config.TELEGRAM_BOT_TOKEN).build()
     
+    # Register handlers
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("clear", clear_command))
@@ -32,4 +39,5 @@ def setup_application():
     app.post_init = post_init
     return app
 
+# This is what flask_app.py imports
 main_application = setup_application()
