@@ -1,18 +1,29 @@
 import logging
 import asyncio
 import os
+import sys
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from flask import Flask, request, jsonify
 from telegram import Update, Bot
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 from config import Config
 from dotenv import load_dotenv
 
-# Configure logging
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
+# --- PHNOM PENH TIME LOGGING SETUP ---
+class PhnomPenhFormatter(logging.Formatter):
+    def formatTime(self, record, datefmt=None):
+        dt = datetime.fromtimestamp(record.created, tz=ZoneInfo('Asia/Phnom_Penh'))
+        return dt.strftime(datefmt or '%Y-%m-%d %H:%M:%S %Z')
+
+# Setup logging with Cambodia Time
+handler = logging.StreamHandler(sys.stderr)
+handler.setFormatter(PhnomPenhFormatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+logger.addHandler(handler)
+logger.propagate = False 
 
 app = Flask(__name__)
 
@@ -24,11 +35,15 @@ asyncio.set_event_loop(loop)
 def reload_config():
     """Force reload the .env file to ensure the NEW token is used"""
     project_home = '/home/sokha/py-telegram'
+    # load_dotenv with override=True is critical to replace the old token in memory
     load_dotenv(os.path.join(project_home, '.env'), override=True)
+    
     import importlib
     import config
     importlib.reload(config)
-    logger.info(f"🔄 Config reloaded. Token starts with: {Config.TELEGRAM_BOT_TOKEN[:5]}...")
+    
+    token = Config.TELEGRAM_BOT_TOKEN or ""
+    logger.info(f"🔄 Config reloaded (KH Time). Token prefix: {token[:8]}...")
 
 async def initialize_bot():
     """Initialize bot for Webhook mode with fresh token"""
@@ -38,7 +53,7 @@ async def initialize_bot():
         # 1. Reload the environment variables first
         reload_config()
         
-        logger.info("🚀 Starting bot initialization...")
+        logger.info("🇰🇭 Starting bot initialization in Phnom Penh time...")
         
         # Import handlers inside function to avoid circular imports
         from handlers.commands import (
@@ -69,27 +84,37 @@ async def initialize_bot():
         bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
         bot_app.add_error_handler(error_handler)
         
-        # Initialize
+        # Initialize the internal telegram-bot state
         await bot_app.initialize()
-        logger.info("✅ Bot initialized successfully with new token")
+        logger.info("✅ Bot initialized successfully with current token")
         return bot_app
         
     except Exception as e:
         logger.error(f"❌ Initialization Error: {e}")
+        bot_app = None
         return None
 
-# Trigger initialization on startup
+# Trigger initial startup
 bot_app = loop.run_until_complete(initialize_bot())
 
 @app.route('/')
 def index():
-    return f"🤖 Bot Active! Token prefix: {Config.TELEGRAM_BOT_TOKEN[:5]}...", 200
+    status = "✅ ACTIVE" if bot_app else "❌ FAILED"
+    token_val = Config.TELEGRAM_BOT_TOKEN or "MISSING"
+    kh_time = datetime.now(ZoneInfo('Asia/Phnom_Penh')).strftime('%Y-%m-%d %H:%M:%S')
+    return f"🤖 Bot Status: {status}<br>Time: {kh_time}<br>Token Prefix: {token_val[:8]}...", 200
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    """Handle Telegram updates"""
+    """Handle Telegram updates with self-healing check"""
+    global bot_app
+    
+    # Self-healing: If bot failed to initialize, try again when a message arrives
     if bot_app is None:
-        return "Bot not ready", 500
+        logger.warning("⚠️ Bot was None at webhook call. Attempting emergency re-init...")
+        bot_app = loop.run_until_complete(initialize_bot())
+        if bot_app is None:
+            return "Bot Initialization Failed", 500
         
     try:
         update_data = request.get_json(force=True)
@@ -105,12 +130,16 @@ def set_webhook():
     """Force Telegram to use the current URL and Token"""
     try:
         url = "https://sokha.pythonanywhere.com/webhook"
+        # Use fresh token from Config
         bot = Bot(token=Config.TELEGRAM_BOT_TOKEN)
+        
         temp_loop = asyncio.new_event_loop()
-        # Clean old webhooks first
+        # Clean old webhooks first to avoid conflicts
         temp_loop.run_until_complete(bot.delete_webhook(drop_pending_updates=True))
         # Set new
         success = temp_loop.run_until_complete(bot.set_webhook(url=url))
+        
         return f"✅ Webhook set to {url}. Success: {success}"
     except Exception as e:
+        logger.error(f"❌ Set Webhook Error: {e}")
         return f"❌ Error: {e}"
