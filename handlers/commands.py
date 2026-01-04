@@ -1,7 +1,9 @@
-from telegram import Update
-from telegram.ext import ContextTypes
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.constants import ParseMode
+from telegram.ext import ContextTypes, CommandHandler
 from services.logger import LoggerService
 from services.bot_service import BotService
+from services.payroll_service import PayrollService
 import datetime
 from zoneinfo import ZoneInfo
 
@@ -38,14 +40,41 @@ What would you like to talk about?"""
     await update.message.reply_text(welcome_msg)
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /help command"""
+    """Handle /help command with a polished UI"""
+    
+    help_text = (
+        "<b>✨ Assistant Control Panel</b>\n"
+        "<i>Your all-in-one management menu</i>\n\n"
+        "<b>📂 General Commands</b>\n"
+        "• /start — 🚀 Launch the assistant\n"
+        "• /help — ❓ View this menu\n"
+        "• /stats — 📊 Performance metrics\n\n"
+        "<b>🛠 Management</b>\n"
+        "• /clear — 🧹 Wipe chat history\n"
+        "• /myGroup — 👥 Group settings\n\n"
+        "<b>🤖 AI Engine Control</b>\n"
+        "• /startAI — 🟢 Enable AI responses\n"
+        "• /stopAI — 🔴 Disable AI responses\n\n"
+        "<b>🤖 More Feature</b>\n"
+        "• /payroll — 💰 count the days until your next pay\n\n"
+        "────────────────────\n"
+        "<i>Need more help? Contact @SupportHandle</i>"
+    )
+
+    # Adding buttons makes it feel like a real app
+    keyboard = [
+        [
+            InlineKeyboardButton("🛠 Settings", callback_data='settings'),
+            InlineKeyboardButton("📊 Stats", callback_data='stats')
+        ],
+        [InlineKeyboardButton("🌐 Visit Website", url="https://yourwebsite.com")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
     await update.message.reply_text(
-        "🤖 Commands:\n\n"
-        "/start - Start the bot\n"
-        "/help - Show help\n"
-        "/clear - Clear conversation\n"
-        "/stats - Show statistics\n\n"
-        "Just send me any message!"
+        text=help_text,
+        reply_markup=reply_markup,
+        parse_mode=ParseMode.HTML
     )
 
 async def clear_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -169,3 +198,15 @@ async def debug_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Used debug command",
         f"AI enabled: {is_enabled}, Conv length: {conv_length}"
     )
+
+async def payroll_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /payroll command"""
+    pay_info = PayrollService.get_next_payday_info()
+    
+    response = (
+        f"{pay_info['message']}\n\n"
+        f"📅 ថ្ងៃបើកលុយបន្ទាប់: <b>{pay_info['date_str']}</b>\n"
+        f"────────────────────"
+    )
+    
+    await update.message.reply_text(response, parse_mode=ParseMode.HTML)
