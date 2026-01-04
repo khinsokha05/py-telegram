@@ -1,9 +1,11 @@
 import logging
 import asyncio
+import os
 from flask import Flask, request, jsonify
 from telegram import Update, Bot
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 from config import Config
+from dotenv import load_dotenv
 
 # Configure logging
 logging.basicConfig(
@@ -16,15 +18,26 @@ app = Flask(__name__)
 
 # Global instances
 bot_app = None
+loop = asyncio.new_event_loop()
+asyncio.set_event_loop(loop)
+
+def reload_config():
+    """Force reload the .env file to ensure the NEW token is used"""
+    project_home = '/home/sokha/py-telegram'
+    load_dotenv(os.path.join(project_home, '.env'), override=True)
+    import importlib
+    import config
+    importlib.reload(config)
+    logger.info(f"🔄 Config reloaded. Token starts with: {Config.TELEGRAM_BOT_TOKEN[:5]}...")
 
 async def initialize_bot():
-    """Initialize bot for Webhook mode"""
+    """Initialize bot for Webhook mode with fresh token"""
     global bot_app
     
-    if bot_app is not None:
-        return bot_app
-
     try:
+        # 1. Reload the environment variables first
+        reload_config()
+        
         logger.info("🚀 Starting bot initialization...")
         
         # Import handlers inside function to avoid circular imports
@@ -41,7 +54,7 @@ async def initialize_bot():
         # Build application
         bot_app = Application.builder().token(Config.TELEGRAM_BOT_TOKEN).build()
         
-        # Register ALL handlers (Sync with bot.py)
+        # Register ALL handlers
         bot_app.add_handler(CommandHandler("start", start))
         bot_app.add_handler(CommandHandler("help", help_command))
         bot_app.add_handler(CommandHandler("clear", clear_command))
@@ -58,7 +71,7 @@ async def initialize_bot():
         
         # Initialize
         await bot_app.initialize()
-        logger.info("✅ Bot initialized successfully")
+        logger.info("✅ Bot initialized successfully with new token")
         return bot_app
         
     except Exception as e:
@@ -66,42 +79,38 @@ async def initialize_bot():
         return None
 
 # Trigger initialization on startup
-loop = asyncio.new_event_loop()
-asyncio.set_event_loop(loop)
 bot_app = loop.run_until_complete(initialize_bot())
 
 @app.route('/')
 def index():
-    return "🤖 Telegram Bot is Active!", 200
+    return f"🤖 Bot Active! Token prefix: {Config.TELEGRAM_BOT_TOKEN[:5]}...", 200
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
     """Handle Telegram updates"""
-    if request.method == "POST":
-        try:
-            update_data = request.get_json(force=True)
-            update = Update.de_json(update_data, bot_app.bot)
-            
-            # This is the most stable way to process updates on PythonAnywhere
-            loop.run_until_complete(bot_app.process_update(update))
-            
-            return "OK", 200
-        except Exception as e:
-            logger.error(f"❌ Webhook Processing Error: {e}")
-            return "Error", 500
+    if bot_app is None:
+        return "Bot not ready", 500
+        
+    try:
+        update_data = request.get_json(force=True)
+        update = Update.de_json(update_data, bot_app.bot)
+        loop.run_until_complete(bot_app.process_update(update))
+        return "OK", 200
+    except Exception as e:
+        logger.error(f"❌ Webhook Error: {e}")
+        return "Error", 500
 
 @app.route('/set_webhook')
 def set_webhook():
-    """Setup the URL connection with Telegram"""
+    """Force Telegram to use the current URL and Token"""
     try:
-        # Use your specific PythonAnywhere URL
         url = "https://sokha.pythonanywhere.com/webhook"
         bot = Bot(token=Config.TELEGRAM_BOT_TOKEN)
-        
-        # Use a fresh loop for the setup task
         temp_loop = asyncio.new_event_loop()
-        success = temp_loop.run_until_complete(bot.set_webhook(url=url, drop_pending_updates=True))
-        
+        # Clean old webhooks first
+        temp_loop.run_until_complete(bot.delete_webhook(drop_pending_updates=True))
+        # Set new
+        success = temp_loop.run_until_complete(bot.set_webhook(url=url))
         return f"✅ Webhook set to {url}. Success: {success}"
     except Exception as e:
         return f"❌ Error: {e}"
