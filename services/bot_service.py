@@ -9,7 +9,7 @@ bot_start_time = time.time()
 total_messages = 0
 unique_users = set()
 
-# AI enabled chats
+# AI enabled chats..
 ai_enabled_chats = set()
 
 class BotService:
