@@ -53,7 +53,7 @@ class BotService:
     async def check_user_permission(user_id):
         """Check if user has permission"""
         if not Config.ADMIN_IDS:
-            return True  # No restrictions if no admin IDs set
+            return True  # No restrictions if no admin IDs set ..
         
         return str(user_id) in Config.ADMIN_IDS
     
