@@ -11,7 +11,7 @@ jobs:
     env:
       PA_USER: sokha
       PA_API: https://www.pythonanywhere.com/api/v0/user/sokha
-      # Command to run inside the console (newline will be added later)
+      # Command to run inside the console (newline will be added later).
       DEPLOY_CMD: "deploy"
 
     steps:
