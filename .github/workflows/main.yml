@@ -1,0 +1,176 @@
+name: Deploy via PythonAnywhere Console (reuse if possible)
+
+on:
+  push:
+    branches: [ dev ]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      PA_USER: sokha
+      PA_API: https://www.pythonanywhere.com/api/v0/user/sokha
+      # Command to run inside the console (newline will be added later).
+      DEPLOY_CMD: "deploy"
+
+    steps:
+      - name: Check required secrets
+        run: |
+          set -euo pipefail
+          missing=0
+          if [ -z "${{ secrets.PYTHONANYWHERE_API_TOKEN }}" ]; then echo "❌ Missing secret: PYTHONANYWHERE_API_TOKEN"; missing=1; fi
+          if [ -z "${{ secrets.TELEGRAM_BOT_TOKEN }}" ]; then echo "❌ Missing secret: TELEGRAM_BOT_TOKEN"; missing=1; fi
+          if [ -z "${{ secrets.TELEGRAM_CHAT_ID }}" ]; then echo "❌ Missing secret: TELEGRAM_CHAT_ID"; missing=1; fi
+          if [ "$missing" -ne 0 ]; then exit 1; fi
+          echo "✅ All required secrets present"
+
+      - name: Ensure jq is available
+        run: |
+          set -euo pipefail
+          if ! command -v jq >/dev/null 2>&1; then
+            sudo apt-get update && sudo apt-get install -y jq
+          fi
+
+      - name: List consoles
+        id: list
+        run: |
+          set -euo pipefail
+          CONS=$(curl -sS --fail \
+            -H "Authorization: Token ${{ secrets.PYTHONANYWHERE_API_TOKEN }}" \
+            "$PA_API/consoles/")
+          echo "Consoles: $CONS"
+          echo "$CONS" > consoles.json
+
+      - name: Try existing bash consoles
+        id: try_existing
+        run: |
+          set -euo pipefail
+          found_success=0
+          ids=$(jq -r '.[] | select(.executable=="bash") | .id' consoles.json || true)
+          for ID in $ids; do
+            echo "Trying console $ID ..."
+            BODY=$(jq -nc --arg cmd "${{ env.DEPLOY_CMD }}" '{input: ($cmd + "\n")}')
+            RESP=$(curl -sS -w "\n%{http_code}" -X POST \
+              -H "Authorization: Token ${{ secrets.PYTHONANYWHERE_API_TOKEN }}" \
+              -H "Content-Type: application/json" \
+              -d "$BODY" \
+              "$PA_API/consoles/$ID/send_input/")
+            CODE=$(echo "$RESP" | tail -n1)
+            MSG=$(echo "$RESP" | sed '$d')
+            echo "Console $ID -> HTTP $CODE :: $MSG"
+            echo "LAST_SENDINPUT_CODE=$CODE" >> $GITHUB_ENV
+            echo "LAST_SENDINPUT_MSG=$(echo "$MSG" | tr '\n' ' ')" >> $GITHUB_ENV
+
+            if [ "$CODE" -ge 200 ] && [ "$CODE" -lt 300 ]; then
+              echo "CONSOLE_ID=$ID" >> $GITHUB_ENV
+              found_success=1
+              break
+            fi
+          done
+
+          if [ "$found_success" -eq 0 ]; then
+            echo "No existing started console accepted input."
+          fi
+
+      - name: Create new console (best-effort)
+        if: ${{ env.CONSOLE_ID == '' }}
+        id: create
+        run: |
+          set -euo pipefail
+          CREATE=$(curl -sS --fail -X POST \
+            -H "Authorization: Token ${{ secrets.PYTHONANYWHERE_API_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d '{"executable":"bash"}' \
+            "$PA_API/consoles/")
+          echo "Create response: $CREATE"
+          ID=$(echo "$CREATE" | jq -r '.id')
+          echo "NEW_CONSOLE_ID=$ID" >> $GITHUB_ENV
+
+      - name: Explain limitation and fail if no started console
+        if: ${{ env.CONSOLE_ID == '' }}
+        run: |
+          echo "::warning::Created console id=${{ env.NEW_CONSOLE_ID }}, but PythonAnywhere does NOT start consoles via API. Open it once in the PA UI to start it, or switch to a webhook that runs /home/${{ env.PA_USER }}/deploy.sh directly."
+          exit 1
+
+      # -------- Telegram notifications --------
+
+      - name: Verify deploy via health check (retry)
+        run: |
+          set -euo pipefail
+          if [ -z "${{ secrets.HEALTH_URL }}" ]; then
+            echo "⚠️ HEALTH_URL secret not set — skipping health check"
+            exit 0
+          fi
+
+          # Use date for a more reliable timestamp
+          START_T=$(date +%s)
+          url="${{ secrets.HEALTH_URL }}"
+          # --- ADDED DELAY BELOW ---
+          echo "Waiting 5 seconds for deployment to settle before starting checks..."
+          sleep 5
+          echo "Checking health: $url"
+
+          # retry up to 12 times (~60s), since deploy may take a bit
+          ok=0
+          attempts=0
+          for i in $(seq 1 12); do
+            attempts=$i
+            code=$(curl -s -o /dev/null -w "%{http_code}" "$url" || true)
+            echo "Attempt $i => HTTP $code"
+            if [ "$code" = "200" ]; then ok=1; break; fi
+            sleep 5
+          done
+
+          # Calculate total duration using expr for compatibility
+          END_T=$(date +%s)
+          DIFF_SEC=$(expr $END_T - $START_T)
+
+          echo "HEALTH_HTTP=$code" >> $GITHUB_ENV
+          echo "HEALTH_ATTEMPTS=$attempts" >> $GITHUB_ENV
+          echo "HEALTH_DURATION=${DIFF_SEC}s" >> $GITHUB_ENV
+
+          if [ "$ok" -ne 1 ]; then
+            echo "Health check failed"
+            exit 1
+          fi
+          echo "Health check OK ($attempts attempts in ${DIFF_SEC}s)"
+
+      - name: Notify Telegram (success)
+        if: ${{ success() }}
+        run: |
+          set -euo pipefail
+          RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          CID="${CONSOLE_ID:-${NEW_CONSOLE_ID:-N/A}}"
+      
+          TEXT=$(printf '<b>✅ DEPLOYMENT SUCCESSFUL</b>\n\n<b>🏖 Repository</b> <code>%s</code>\n<b>🌿 Branch</b> <code>%s</code>\n<b>Ⓜ️ Commit</b> <code>%s</code>\n\n<b>🍒 Console ID</b> <code>%s</code>\n<b>🐙 CI/CD</b> <code>code=%s | msg=%s</code>\n<b>💚 Health</b> <code>%s</code>\n<b>🫆 Workflow</b> <a href="%s">🐞 view logs</a> | 🧬 Attempts: %s | ♻️ Duration: %s\n' \
+            "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME" "$GITHUB_SHA" "$CID" \
+            "${LAST_SENDINPUT_CODE:-200}" "${LAST_SENDINPUT_MSG:-OK}" \
+            "${HEALTH_HTTP:-N/A}" "$RUN_URL" \
+            "${HEALTH_ATTEMPTS}" \
+            "${HEALTH_DURATION}")
+      
+          curl -sS -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+            -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
+            -d parse_mode="HTML" \
+            --data-urlencode "text=${TEXT}"
+
+
+      - name: Notify Telegram (failure)
+        if: ${{ failure() }}
+        run: |
+          set -euo pipefail
+          RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          CID="${CONSOLE_ID:-${NEW_CONSOLE_ID:-N/A}}"
+      
+          TEXT=$(printf '<b>❌ DEPLOYMENT FAILED</b>\n\n<b>🏖 Repository</b> <code>%s</code>\n<b>🌿 Branch</b> <code>%s</code>\n<b>Ⓜ️ Commit</b> <code>%s</code>\n\n<b>🍒 Console ID</b> <code>%s</code>\n<b>🐙 CI/CD</b> <code>code=%s | msg=%s</code>\n<b>💚 Health</b> <code>%s</code>\n<b>🫆 Workflow</b> <a href="%s">🐞 view logs</a> | 🧬 Attempts: %s | ♻️ Duration: %s\n' \
+            "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME" "$GITHUB_SHA" "$CID" \
+            "${LAST_SENDINPUT_CODE:-N/A}" "${LAST_SENDINPUT_MSG:-N/A}" \
+            "${HEALTH_HTTP:-N/A}" "$RUN_URL" \
+            "${HEALTH_ATTEMPTS}" \
+            "${HEALTH_DURATION}")
+      
+          curl -sS -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+            -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
+            -d parse_mode="HTML" \
+            --data-urlencode "text=${TEXT}"
