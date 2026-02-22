@@ -67,7 +67,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton("🛠 Settings", callback_data='settings'),
             InlineKeyboardButton("📊 Stats", callback_data='stats')
         ],
-        [InlineKeyboardButton("🌐 Visit Website", url="https://yourwebsite.com")]
+        [InlineKeyboardButton("🌐 Visit Website", url="https://sokha.pythonanywhere.com/")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
